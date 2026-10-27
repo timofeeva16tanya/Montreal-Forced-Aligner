@@ -133,3 +133,44 @@ def test_export_preserves_clitics_and_original_text(tmp_path, monkeypatch):
 
     assert captured["seg.TextGrid"]["data"]["speaker"]["words"] == [(0.0, 0.4, "don't")]
     assert captured["seg.TextGrid"]["data"]["speaker"]["utterances"] == [(0.0, 1.0, "don't")]
+
+
+def test_export_word_only_file_before_another_speaker(tmp_path, monkeypatch):
+    """A missing phone group must not require that speaker in another file."""
+    file_batch = {
+        1: ("word_only", Path("."), 12.0, Path("word_only.lab")),
+        2: ("with_phones", Path("."), 11.0, Path("with_phones.lab")),
+    }
+    phones = [(0.43, 0.93, "k", "second_speaker", 2)]
+    words = [
+        (9.93, 11.36, "afligirá", "first_speaker", 1),
+        (0.43, 0.93, "quedóse", "second_speaker", 2),
+    ]
+    utterances = [
+        (0.0, 12.0, "ni judá afligirá", "first_speaker", 1),
+        (0.0, 11.0, "quedóse en donde estaba", "second_speaker", 2),
+    ]
+
+    paths, captured = run_export(
+        tmp_path,
+        monkeypatch,
+        phones,
+        words,
+        file_batch,
+        utterances,
+        include_original_text=True,
+    )
+
+    assert [path.name for path in paths] == ["word_only.TextGrid", "with_phones.TextGrid"]
+    first = captured["word_only.TextGrid"]["data"]
+    second = captured["with_phones.TextGrid"]["data"]
+    assert set(first) == {"first_speaker"}
+    assert first["first_speaker"]["phones"] == []
+    assert first["first_speaker"]["words"] == [(9.93, 11.36, "afligirá")]
+    assert first["first_speaker"]["utterances"] == [(0.0, 12.0, "ni judá afligirá")]
+    assert set(second) == {"second_speaker"}
+    assert second["second_speaker"]["words"] == [(0.43, 0.93, "quedóse")]
+    assert second["second_speaker"]["phones"] == [(0.43, 0.93, "k")]
+    assert second["second_speaker"]["utterances"] == [
+        (0.0, 11.0, "quedóse en donde estaba")
+    ]
