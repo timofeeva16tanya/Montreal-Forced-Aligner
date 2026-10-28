@@ -9,7 +9,6 @@ The input directory must contain the two <id>.wav files in samples.json.
 The repository must contain the base and PR commits recorded below.
 """
 import argparse
-import ast
 import json
 import os
 from pathlib import Path
@@ -44,20 +43,8 @@ def main():
     mfa = shutil.which('mfa')
     if not mfa:
         raise RuntimeError('Run this script in an environment with MFA installed.')
-    # Patch only the export function in this child process. Never edit the installation.
-    wrapper = output / 'mfa_wrapper.py'
-    wrapper.write_text(
-        "import ast,runpy,sys\n"
-        "from itertools import groupby\n"
-        "from pathlib import Path\n"
-        "from montreal_forced_aligner import textgrid\n"
-        "source=Path(sys.argv.pop(1)).read_text()\n"
-        "cli=sys.argv.pop(1)\n"
-        "node=next(n for n in ast.parse(source).body if isinstance(n,ast.FunctionDef) and n.name=='construct_textgrid_output')\n"
-        "ns=dict(vars(textgrid),groupby=groupby)\n"
-        "exec(compile(ast.Module(body=[node],type_ignores=[]),'exact-export-function','exec'),ns)\n"
-        "textgrid.construct_textgrid_output=ns['construct_textgrid_output']\n"
-        "runpy.run_path(cli,run_name='__main__')\n", encoding='utf-8')
+    # Shared wrapper replaces every imported alias and traces actual calls.
+    wrapper = Path(__file__).resolve().parents[1] / 'pr979_public_corpora' / 'reproduce.py'
     for transcript in ['original', 'corrected']:
         corpus = output / 'corpus' / transcript
         for row in samples:
@@ -70,9 +57,11 @@ def main():
             job.mkdir(parents=True)
             env = dict(os.environ, MFA_ROOT_DIR=str(job / 'mfa_root'),
                        OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1', MKL_NUM_THREADS='1')
-            command = [sys.executable, str(wrapper), str(source), mfa, 'align', str(corpus),
+            for key in ['PYTHONPATH', 'MFA_PATCH_TEXTGRID_EXPORT', 'MFA_PATCH_TEXTGRID_EXPORT_WITH_UNK', 'MFA_SYNTHESIZE_UNK']:
+                env.pop(key, None)
+            command = [sys.executable, str(wrapper), '_cli', str(source), str(job / 'export_trace.jsonl'), mfa, 'align', str(corpus),
                        str(args.dictionary.resolve()), str(args.acoustic_model.resolve()),
-                       str(job / 'textgrids'), '--num_jobs', '2', '--temporary_directory',
+                       str(job / 'textgrids'), '--num_jobs', '1', '--no_use_mp', '--temporary_directory',
                        str(job / 'scratch'), '--no_use_postgres', '--no_final_clean',
                        '--output_format', 'long_textgrid', '--include_original_text', '--clean']
             with (job / 'run.log').open('w', encoding='utf-8') as log:
